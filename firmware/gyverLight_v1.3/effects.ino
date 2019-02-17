@@ -86,7 +86,7 @@ void sparkles() {
 #define SPARKING 120
 
 void fire() {
-  random16_add_entropy( random());
+  random16_add_entropy( rand());
   Fire2012WithPalette(); // run simulation frame, using palette colors
 }
 
