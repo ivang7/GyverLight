@@ -24,8 +24,9 @@
 #define CURRENT_LIMIT 2000  // лимит по току в миллиамперах, автоматически управляет яркостью (пожалей свой блок питания!) 0 - выключить лимит
 #define AUTOPLAY_TIME 30    // время между сменой режимов в секундах
 
-#define NUM_LEDS 14         // количсетво светодиодов в одном отрезке ленты
-#define NUM_STRIPS 4        // количество отрезков ленты (в параллели)
+#define NUM_LEDS 15         // количсетво светодиодов в одном отрезке ленты
+#define NUM_STRIPS 1        // количество отрезков ленты (в параллели)
+#define NUM_STRIPS_SEQUENCE 4    // количество отрезков ленты (соединеных последовательно)
 #define LED_PIN 6           // пин ленты
 #define BTN_PIN 2           // пин кнопки/сенсора
 #define MIN_BRIGHTNESS 5  // минимальная яркость при ручной настройке
@@ -39,7 +40,7 @@
 GButton touch(BTN_PIN, LOW_PULL, NORM_OPEN);
 
 #include <FastLED.h>
-CRGB leds[NUM_LEDS];
+CRGB leds[NUM_LEDS * NUM_STRIPS_SEQUENCE];
 CRGBPalette16 gPal;
 
 #include "GyverTimer.h"
@@ -64,9 +65,17 @@ boolean wasStep = false;
 
 // залить все
 void fillAll(CRGB newcolor) {
-  for (int i = 0; i < NUM_LEDS; i++) {
+  for (int i = 0; i < NUM_LEDS * NUM_STRIPS_SEQUENCE; i++) {
     leds[i] = newcolor;
   }
+}
+
+void repeatStrips()
+{
+  if(NUM_STRIPS_SEQUENCE > 1)
+    for(byte i = 1; i < NUM_STRIPS_SEQUENCE; i++)
+      for(short l=0; l < NUM_LEDS; l++)
+        leds[l + NUM_LEDS*i] = leds[NUM_LEDS*i - l - 1];
 }
 
 // функция получения цвета пикселя по его номеру
@@ -76,8 +85,8 @@ uint32_t getPixColor(int thisPixel) {
 
 void setup() {
   Serial.begin(9600);
-  FastLED.addLeds<WS2811, LED_PIN, GRB>(leds, NUM_LEDS).setCorrection( TypicalLEDStrip );
-  if (CURRENT_LIMIT > 0) FastLED.setMaxPowerInVoltsAndMilliamps(5, CURRENT_LIMIT / NUM_STRIPS);
+  FastLED.addLeds<WS2811, LED_PIN, GRB>(leds, NUM_LEDS * NUM_STRIPS_SEQUENCE).setCorrection( TypicalLEDStrip );
+  if (CURRENT_LIMIT > 0) FastLED.setMaxPowerInVoltsAndMilliamps(5, CURRENT_LIMIT / NUM_STRIPS / NUM_STRIPS_SEQUENCE);
   FastLED.setBrightness(brightness);
   FastLED.show();
 
@@ -159,6 +168,7 @@ void loop() {
       case 5: fire();
         break;
     }
+    if(thisMode < 6) repeatStrips();
     FastLED.show();
   }
 
