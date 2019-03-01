@@ -27,8 +27,8 @@
 #define NUM_LEDS 15         // количсетво светодиодов в одном отрезке ленты
 #define NUM_STRIPS 1        // количество отрезков ленты (в параллели)
 #define NUM_STRIPS_SEQUENCE 4    // количество отрезков ленты (соединеных последовательно)
-#define LED_PIN 6           // пин ленты
-#define BTN_PIN 2           // пин кнопки/сенсора
+#define LED_PIN 6           // пин ленты 
+#define BTN_PIN 4           // пин кнопки/сенсора-esp d2
 #define MIN_BRIGHTNESS 5  // минимальная яркость при ручной настройке
 #define BRIGHTNESS 250      // начальная яркость
 #define FIRE_PALETTE 0      // разные типы огня (0 - 3). Попробуй их все! =)
@@ -47,6 +47,14 @@ CRGBPalette16 gPal;
 GTimer_ms effectTimer(60);
 GTimer_ms autoplayTimer((long)AUTOPLAY_TIME * 1000);
 GTimer_ms brightTimer(20);
+
+#ifdef ESP8266
+  #define LED 2
+  #define BUTTON 0
+  #include "html.h"
+// #else //все равно не билдится для уно - ругается на либы
+//     void write_param(String a, String b){};
+#endif
 
 int brightness = BRIGHTNESS;
 int tempBrightness;
@@ -83,6 +91,80 @@ uint32_t getPixColor(int thisPixel) {
   return (((uint32_t)leds[thisPixel].r << 16) | ((long)leds[thisPixel].g << 8 ) | (long)leds[thisPixel].b);
 }
 
+void callbackFunction(String name, String value) {
+  if(name == "mode")
+  {
+    int mode = value.toInt();
+
+    //разные режимы анимаций
+    if(mode > -1 && mode < MODES_AMOUNT) {
+      autoplay = false;
+
+      //TODO нужно убрать таймеры отсюда
+      if(whiteMode)
+      {
+        whiteMode = false;
+        effectTimer.start();
+      }
+
+      if(!powerState) {
+        powerDirection = true;
+        powerActive = true;
+        tempBrightness = 0;
+      }
+
+      thisMode = mode - 1;
+
+      nextMode();
+    }
+    //выключение лампы 
+    else if (mode == -2)
+    {
+      powerDirection = false;
+      powerActive = true;
+      tempBrightness = brightness;
+    }
+    //переключение всех режимов
+    else if (mode == -3)
+    {
+      autoplay = true;
+      //TODO нужно убрать таймеры отсюда
+      if(whiteMode) {
+        whiteMode = false;
+        effectTimer.start();
+      }
+
+      if(!powerState) {
+        powerDirection = true;
+        powerActive = true;
+        tempBrightness = 0;
+      }      
+    }
+    //режим белой лампы
+    else if(mode == -1)
+    {
+      whiteMode = true;
+      effectTimer.stop();
+      fillAll(CRGB::White);
+
+      if(!powerState) {
+        powerDirection = true;
+        powerActive = true;
+        tempBrightness = 0;
+      }
+
+      FastLED.show();
+    }
+  }
+  //управление яркостью
+  else if(name=="brightness")
+  {
+    brightness = value.toInt();
+    FastLED.setBrightness(brightness);
+    FastLED.show();
+  }
+}
+
 void setup() {
   Serial.begin(9600);
   FastLED.addLeds<WS2811, LED_PIN, GRB>(leds, NUM_LEDS * NUM_STRIPS_SEQUENCE).setCorrection( TypicalLEDStrip );
@@ -98,9 +180,21 @@ void setup() {
   else if (FIRE_PALETTE == 1) gPal = CRGBPalette16( CRGB::Black, CRGB::Red, CRGB::Yellow, CRGB::White);
   else if (FIRE_PALETTE == 2) gPal = CRGBPalette16( CRGB::Black, CRGB::Blue, CRGB::Aqua,  CRGB::White);
   else if (FIRE_PALETTE == 3) gPal = CRGBPalette16( CRGB::Black, CRGB::Red, CRGB::White);
+
+  #ifdef ESP8266
+    framework(callbackFunction);
+  #endif
 }
 
 void loop() {
+  #ifdef ESP8266
+    //framework_handle();
+  #endif
+  
+  mainLed();
+}
+
+void mainLed() {
   touch.tick();
   if (touch.hasClicks()) {
     byte clicks = touch.getClicks();
@@ -125,7 +219,14 @@ void loop() {
           }
         }
         break;
-      case 4: if (!whiteMode && !powerActive) autoplay = !autoplay;
+      case 4: if (!whiteMode && !powerActive) {
+          autoplay = !autoplay;
+          if(autoplay) {
+            write_param(F("mode"), F("-3"));
+          } else {
+            write_param(F("mode"), String(thisMode));
+          }
+        }
         break;
       default:
         break;
@@ -149,6 +250,7 @@ void loop() {
   if (touch.isRelease()) {
     if (wasStep) {
       wasStep = false;
+      write_param(F("brightness"), String(brightness));
       brightDirection = !brightDirection;
     }
   }
@@ -172,7 +274,7 @@ void loop() {
     FastLED.show();
   }
 
-  if (autoplayTimer.isReady() && autoplay) {    // таймер смены режима
+  if (powerState && autoplayTimer.isReady() && autoplay) {    // таймер смены режима
     nextMode();
   }
 
@@ -182,6 +284,9 @@ void loop() {
 void nextMode() {
   thisMode++;
   if (thisMode >= MODES_AMOUNT) thisMode = 0;
+  //обновляем параметр только если это не автоматическое переключение
+  if(!autoplay) write_param(F("mode"), String(thisMode));
+
   loadingFlag = true;
   FastLED.clear();
 }
@@ -190,6 +295,7 @@ void brightnessTick() {
   if (powerActive) {
     if (brightTimer.isReady()) {
       if (powerDirection) {
+        write_param(F("mode"), String(thisMode));
         powerState = true;
         tempBrightness += 10;
         if (tempBrightness > brightness) {
@@ -204,6 +310,7 @@ void brightnessTick() {
           tempBrightness = 0;
           powerActive = false;
           powerState = false;
+          write_param(F("mode"), F("-2"));//выключена лампа
         }
         FastLED.setBrightness(tempBrightness);
         FastLED.show();
